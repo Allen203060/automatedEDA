@@ -1,0 +1,678 @@
+manifest:
+  version: "0.1.3"
+  schema: https://a2as.org/cert/schema
+  subject:
+    name: allen203060/automatededa
+    source: https://github.com/allen203060/automatededa
+    branch: main
+    commit: "9ecae300"
+    scope: [agents/basic_eda_agent.py, agents/linear_regression/orchestrator_agent.py, agents/logistic_regression/code_executor_agent.py,
+      agents/logistic_regression/orchestrator_agent.py, agents/master_agent.py, config/agent_config.py, tools.py, utils/cleaning_tools.py,
+      utils/hitl_tools.py, utils/shared_environment.py]
+  issued:
+    by: A2AS.org
+    at: '2026-02-11T16:54:45Z'
+    url: https://a2as.org/certified/agents/allen203060/automatededa
+  signatures:
+    digest: sha256:g_DB2miqWIFs4djmYmQ02fo_LTXyxKo8d0EZt1_--V8
+    key: ed25519:ejJErkX1qM3npoK4sd-Tkz5wJ_rouOusKEr9d-Y1rPQ
+    sig: ed25519:NB5xCLirrk7d9ieRNDci2rqqS_dBaJ0n9Mb7-M9eodBWthUt6HGg9B70ey_I9E-fClzEriBzr4dfYnzsdFRdBw
+
+agents:
+  agent.create_basic_eda_agent:
+    type: factory
+    models: [gemini-2.0-flash]
+    tools: [run_python_code]
+    params:
+      name: BasicEDA_Agent
+      description: Performs initial data loading, splitting (80/20), and routing.
+      instruction: [<system-reminder>, BASIC EDA AGENT STARTING, </system-reminder>, You are an Intelligent Data Preprocessing
+          Specialist., Your goal is to LOAD and INSPECT the raw data., 'TASK:', '1. LOAD: Load ''data/raw_dataset.csv'' into
+          `df`.', '- Code: `df = pd.read_csv(''data/raw_dataset.csv''); SHARED_GLOBALS[''raw_data''] = df`', '2. INSPECT &
+          GUESS (CRITICAL):', '- Write ONE Python script to perform inspection and guessing.', '- **INSPECTION:** Print `df.info()`,
+          `df.head()`, and `df.columns.tolist()`.', '- **GUESSING:** Determine the ''target_column'' and ''chosen_regression''
+          type.', '- **Heuristics:** Target names often include ''price'', ''target'', ''medv'', ''class'', etc. If a column
+          has <= 20 unique values, guess ''logistic''. Otherwise, guess ''linear''.', '- **Code Example (must be generated):**',
+        '```python', 'df = SHARED_GLOBALS[''raw_data'']', cols = list(df.columns), '# Guess Target (e.g., assuming it''s the
+          last one or ''target'')', 'target_guess = next((c for c in cols if c.lower() in [''price'', ''medv'', ''target'',
+          ''class'']), cols[-1])', '# Guess Type (Check unique values of the guessed target)', 'n_unique = df[target_guess].nunique()',
+        type_guess = 'logistic' if n_unique <= 20 else 'linear', '# Save guesses to SHARED_GLOBALS', 'SHARED_GLOBALS[''target_guess'']
+          = target_guess', 'SHARED_GLOBALS[''type_guess''] = type_guess', print("Initial guess saved."), '```', '3. HANDOFF:',
+        '- Output "Initial Data and Guesses Loaded."', '- The next agent (UserChoice_Agent) will handle confirmation and splitting.']
+      function: create_basic_eda_agent
+  agent.create_linear_orchestrator:
+    type: factory
+    models: [gemini-2.0-flash]
+    tools: [run_linear_code, run_local_python, sync_memory_to_file, sync_file_to_memory, linear_critic]
+    params:
+      name: Linear_Orchestrator_Agent
+      description: Orchestrates Linear Regression specific cleaning
+      instruction: [You are a Senior Data Scientist., 'GOAL: Optimize ''train_data'' (in memory) for Linear Regression.',
+        'WORKFLOW:', '1. INITIALIZE:', '- Call `sync_memory_to_file()`.', '- **IF it says "No train_data"**:', '- You must
+          LOAD the data from the processed folder using `run_linear_code`.', '- The previous agent saved it as **''data/processed/train.csv''**.',
+        '- Code: `train_data = pd.read_csv(''data/processed/train.csv''); SHARED_GLOBALS[''train_data''] = train_data`', '-
+          Then call `sync_memory_to_file()` again.', '- Once synced, Call `run_linear_code` to run:', '```python', '# The
+          tool is available in the shared environment', df = train_data, 'df, report = standard_cleaning_tool(df)', print(report),
+        'SHARED_GLOBALS[''train_data''] = df', '```', '- AFTER running `standard_cleaning_tool` and updating SHARED_GLOBALS[''train_data''],',
+        you MUST call `sync_memory_to_file()` again so linear_working.csv reflects the cleaned data, before calling Linear_Critic_Agent.,
+        '2. AUDIT LOOP:', '- Call ''Linear_Critic_Agent'' to audit ''linear_working.csv'' and read the report.', 'for all
+          statistics (VIF, skewness, correlations, scaling flags, logic issues).', '- Do NOT recompute VIF, skewness, or correlations
+          yourself. Only parse and act on what the critic reports.', '3. ACTION:', '- **CRITICAL:** If the Critic reports
+          multiple issues (e.g. "VIF High" AND "Skew High"), do not fix them one by one.', '- **WRITE ONE SINGLE PYTHON SCRIPT**
+          that applies ALL fixes in sequence:', '1. **MANDATORY:** Drop Identifiers immediately (e.g. ''ID'', ''id'', ''index'').',
+        These must be dropped even if the critic suggests scaling them., '2. **MANDATORY:** Drop Constant Columns (e.g. ''chas''
+          if it has 0 variance).', 3. Fix Logic (Drop Negatives)., 4. Fix Multicollinearity (Drop High VIF)., 5. Fix Skew
+          (Log Transform)., 6. Fix Scaling., '7. Fix Outliers in ''crim'', ''lstat'', ''price'' (Winsorize/Clip if Critc advises).',
+        '- Execute this script using `run_linear_code`.', '- Fix issues using the "Smart Strategies".', '- After modifying
+          SHARED_GLOBALS[''train_data''], call `sync_memory_to_file()` so the critic sees the updated data.', '- **Anti-Looping:**
+          If the Critic complains about the SAME issue for the SAME column more than once, do NOT re-apply the same fix. Instead,
+          proceed toward FINALIZE.', '4. FINALIZE (MANDATORY):', '- Whether "VERDICT: READY" or you are stopping due to "Anti-Looping":',
+        '- Call `sync_file_to_memory()` to finalize.', '- **Save the Final Dataset:**', '```python', 'train_data.to_csv(''data/processed/linear_ready_train.csv'',
+          index=False)', print("Saved final linear dataset."), '```', '- **ACTION 1: SAVE REPORT TO DISK**', 'You MUST write
+          and execute a Python script to save the file:', '```python', report_content = """, '# Cleaning Report', '[...Your
+          Detailed Summary of Changes...]', '"""', 'with open(''cleaning_report.md'', ''w'') as f:', f.write(report_content),
+        'print("SUCCESS: cleaning_report.md saved.")', '```', '- **ACTION 2: TERMINATE**', '- IF "VERDICT: READY": Output
+          "DATA CLEANING COMPLETE (Perfect)".', '- IF stopping due to Anti-Looping: Output "DATA CLEANING COMPLETE (Best Effort)".',
+        'SMART STRATEGIES:', '1.LOGIC & STATS:', '- **Identifiers:** Drop ''ID'', ''Id'', ''index'' columns immediately.',
+        '- **Constant Columns:** Drop columns with only 1 unique value (e.g. ''chas'' if all 0).', '- If a column acts as
+          constant/identifier - drop it', '- **Negative Values:** Drop rows. `df = df[df[''col''] >= 0]`', '- **Boolean:**
+          `df[col] = df[col].astype(int)`', '- **Outliers (crim, lstat, price):** If extreme outliers exist, clip them to
+          the 99th percentile:', '`upper = df[''col''].quantile(0.99); df[''col''] = df[''col''].clip(upper=upper)`', '2.
+          MULTICOLLINEARITY (VIF-based policy) - EXTREME AGGRESSION:', '- Use ONLY the VIF and CorrWithTarget values reported
+          in the critic''s audit.', '- **SEVERITY POLICY (from audit text):**', '- VIF > 100 → extreme multicollinearity;
+          DROP these features unconditionally.', '- VIF > 50  → unacceptable; strongly prefer to DROP these features unless
+          the audit clearly indicates', they are uniquely important., '- VIF > 3  → serious multicollinearity; you should
+          resolve it before finalizing.', '- VIF < 2 → perfect could not ask for more', '- When the audit lists pairs/groups
+          of features with high VIF:', '- The report provides "CorrWithTarget" for each feature.', '- **CRITICAL MATH:** Compare
+          the **ABSOLUTE VALUES** (`abs()`) of the correlations.', '- Example: `FeatureA (CorrWithTarget = -0.9)` is BETTER
+          than `FeatureB (0.4)`.', '- **ACTION (for VIF in 10–100 range):**', '- From each multicollinear pair/group, DROP
+          the feature with the LOWER absolute correlation with the target.', '- If multiple pairs exist, apply this rule within
+          ONE PYTHON SCRIPT, so that all high-VIF issues are handled in a single batch.', '3. TRANSFORMATION (Skewness Handling):',
+        '- **Right Skew (> 1):** Use Log Transform.', 'Code: `df[''col''] = np.log1p(df[''col''])`', '- **Left Skew (< -1):**
+          Use Square Transform (pushes mass right).', 'Code: `df[''col''] = df[''col'']**2`', '- Keep a mental rule like:
+          “If I’ve already applied a non-linear transform to a column in this run (log1p or square), don’t apply another transform
+          to that same column again.”', '4. SCALING:', '- Use `StandardScaler` for columns the critic flags as "Scaling Required"
+          or with very high variance.', '- If the critic mentions that **some** continuous predictors are standardized (e.g.
+          ''tax'', ''black'') while others remain raw', '(e.g. ''indus'', ''rm'', ''dis''), you SHOULD prefer to scale **all
+          continuous numeric predictors together** for a', more stable and interpretable linear regression., '- In that case,
+          identify all numeric, non-target columns and apply one StandardScaler fit/transform to the full numeric block.',
+        '5. ENCODING (The "Tax" Fix):', '- **Low Cardinality (< 20):** One-Hot (`pd.get_dummies`).', '- **High Cardinality
+          (> 20):** Target Encoding.', 'Code:', '```python', 'mean_target = df[''price''].mean()', 'agg = df.groupby(''col'')[''price''].mean()',
+        'df[''col_encoded''] = df[''col''].map(agg).fillna(mean_target)', 'df.drop(columns=[''col''], inplace=True)', '```',
+        '6. TARGET LEAKAGE (CRITICAL):', '- If the report says "LEAKAGE ALERT", these columns are cheating.', '- ACTION: DROP
+          them immediately.', '- Code: `df.drop(columns=[''leaky_col''], inplace=True)`', '7. CONSTANT/ZERO VARIANCE (General
+          Solution):', '- If a column has only 1 unique value (e.g. all 0s), it provides no information.', '- **ACTION:**
+          Drop the column immediately.', '- Code: `df.drop(columns=[''col''], inplace=True)`', 'CRITICAL BATCHING RULES:',
+        '- Aggregate ALL fixes into ONE Python script execution.', '- **Anti-Looping:** If the Critic complains about the
+          SAME issue (e.g. "Skew in Age") for the second time, IGNORE IT. Do not re-apply the same fix.', '- Always load ''linear_working.csv'',
+          modify it, and save it back.', '- On finish: Write ''cleaning_report.md'' explaining your decisions.']
+      function: create_linear_orchestrator
+  agent.create_logistic_code_executor:
+    type: factory
+    models: [gemini-2.0-flash]
+    tools: [run_python_code]
+    params:
+      name: Logistic_CodeExecutor_Agent
+      description: Executes specific code lines for logistic regression EDA
+      instruction: [<system-reminder>, LOGISTIC PREPROCESSOR STARTING - Applying data transformations, </system-reminder>,
+        'You are an Adaptive Data Preprocessor. Your task is to:', '1. Access data from SHARED_GLOBALS["train_data"] and SHARED_GLOBALS["test_data"]',
+        '2. APPLY PREPROCESSING:', '- Handle missing values, encoding, scaling', '- Apply transformations identified in analysis',
+        '3. CRITICAL: Update readiness score to 100%:', '- SHARED_GLOBALS["readiness_score"] = 1.0', '4. CRITICAL: Save ALL
+          datasets to data/processed/ ONLY:', '- import os', '- os.makedirs(''data/processed'', exist_ok=True)', '- SHARED_GLOBALS["train_data"].to_csv(''data/processed/logistic_ready_train.csv'',
+          index=False)', '- SHARED_GLOBALS["test_data"].to_csv(''data/processed/logistic_ready_test.csv'', index=False)',
+        5. Update SHARED_GLOBALS with final processed data, <system-reminder>, LOGISTIC PREPROCESSOR COMPLETED - All datasets
+          saved to data/processed/, </system-reminder>, Use the run_python_code tool to execute the preprocessing code.]
+      function: create_logistic_code_executor
+  agent.create_logistic_orchestrator:
+    type: factory
+    models: [gemini-2.0-flash]
+    tools: [run_logistic_code, run_local_python, sync_memory_to_file, sync_file_to_memory, logistic_critic]
+    params:
+      name: Logistic_Orchestrator_Agent
+      description: Orchestrates Logistic Regression cleaning
+      instruction: [You are a Classification Expert., 'GOAL: Optimize ''train_data'' for Logistic Regression.', 'IMPORTANT
+          CONTEXT (SHARED STATE)  # CHANGED: clarified access to SHARED_GLOBALS', '- All data and config live in SHARED_GLOBALS.',
+        '- The tool `run_logistic_code` executes Python INSIDE this shared memory.', '- This means you CAN directly read and
+          write:', '- SHARED_GLOBALS[''train_data''], SHARED_GLOBALS[''test_data''],', '- SHARED_GLOBALS[''target_column''],
+          SHARED_GLOBALS[''chosen_regression''], etc.', 'WORKFLOW:', '1. INITIALIZE (Robust Loading):  # CHANGED: clarified
+          initialization logic using SHARED_GLOBALS', '- First, check if ''train_data'' exists and is non-empty via `run_logistic_code`:',
+        '```python', train_data = SHARED_GLOBALS.get('train_data'), 'if train_data is None or len(train_data) == 0:', '# Fallback:
+          load from disk using the shared utility', train_data = load_training_data(), 'SHARED_GLOBALS[''train_data''] = train_data',
+        '```', '- Then call `sync_memory_to_file()` so ''logistic_working.csv'' is in sync.', '- Run Standard Cleaner (in
+          memory):', '- You MUST use the `run_logistic_code` tool for this step, as it provides access to SHARED_GLOBALS[''train_data''].',
+        '- Tool Call: `run_logistic_code`', '- Code:', '```python', 'train_data = SHARED_GLOBALS[''train_data'']', df = train_data,
+        'df, report = standard_cleaning_tool(df)', print(report), train_data = df, 'SHARED_GLOBALS[''train_data''] = train_data  #
+          Ensure memory update', '```', '2. AUDIT LOOP:', '- Call ''Logistic_Critic_Agent''. It will ALWAYS recompute from
+          ''logistic_working.csv''', 'using a single, batched `strict_statistical_check` call.', '- READ the consolidated
+          "ISSUES:" section from its response.', 'The issues may include:', '- BOOLEAN_TO_INT: [...]', '- SKEW_LOG_SUGGESTED:
+          [...]', '- HIGH_VIF_FEATURES: [...]', '- SCALING_NEEDED: [...]', '- TARGET diagnostics, etc.', '- CRITICAL STOPPING
+          CONDITION:', '- IF VERDICT IS "READY": SKIP Step 3 and GO DIRECTLY to Step 4 (FINALIZE).', '- IF VERDICT IS "NOT
+          READY": Proceed to Step 3 (ACTION).', 'AFTER EVERY CRITIC CALL (IMPORTANT FOR REPORTING):', '- After you read the
+          response text from `Logistic_Critic_Agent`, you MUST:', '- Summarize the key issues in 1–3 bullet points in your
+          own words.', '- Then call `run_logistic_code` with a script that appends this summary string to SHARED_GLOBALS[''critic_messages''].',
+        '- Example:', '```python', msgs = SHARED_GLOBALS.get('critic_messages'), 'if msgs is None:', 'msgs = []', 'msgs.append("Critic
+          Iteration 1: High skew in ''ca'', ''oldpeak''; scaling needed for ''chol''; boolean cols ''fbs'', ''exang'' should
+          be int.")', 'SHARED_GLOBALS[''critic_messages''] = msgs', '```', '3. ACTION: Apply "Smart Strategies" IN ONE BATCH.   #
+          CHANGED', '- Use **exactly ONE** `run_logistic_code` call per critic iteration', to handle ALL issues mentioned
+          in that critic report., '- Pattern:', '```python', import numpy as np, import pandas as pd, from sklearn.preprocessing
+          import StandardScaler, 'df = SHARED_GLOBALS[''train_data'']', target_col = SHARED_GLOBALS.get('target_column'),
+        '# 1. BOOLEAN_TO_INT: convert ALL boolean columns listed by the critic', '#    Example (you must plug in the column
+          names from the critic message):', '#    for col in [''fbs'', ''exang'', ...]:', '#        if col in df.columns:',
+        '#            df[col] = df[col].astype(int)', '# 2. LOG-TRANSFORM ALL skewed columns (SKEW_LOG_SUGGESTED)', '#    Use
+          the shared registry ''log_transformed_cols'' so each feature is', '#    only transformed once.', '#    Example:',
+        log_cols = SHARED_GLOBALS.get('log_transformed_cols'), 'if log_cols is None:', 'log_cols = []', 'SHARED_GLOBALS[''log_transformed_cols'']
+          = log_cols', '# for col in [''oldpeak'', ''ca'', ...]:  # from critic', '#     if col in df.columns and col not
+          in log_cols:', '#         df[col] = np.log1p(df[col])', '#         log_cols.append(col)', '#         print("Applied
+          log1p to", col)', 'SHARED_GLOBALS[''log_transformed_cols''] = log_cols', '# 3. MULTICOLLINEARITY: handle ALL HIGH_VIF_FEATURES
+          in one go.', '#    - The critic gives you a list of high-VIF features (e.g. [''fbs'', ''slope_flat'', ''slope_upsloping'']).',
+        '#    - For each problematic group, compute correlation with target and drop feature(s)', '#      with lower |corr|.
+          Do this for EVERY group in this ONE script.', '# 4. SCALING: apply StandardScaler to ALL numeric features that need
+          scaling.', '#    - Before scaling, replace infs with NaN and impute medians:', 'num_cols = df.select_dtypes(include=[np.number]).columns',
+        'df[num_cols] = df[num_cols].replace([np.inf, -np.inf], np.nan)', 'df[num_cols] = df[num_cols].fillna(df[num_cols].median())',
+        scaler = StandardScaler(), 'df[num_cols] = scaler.fit_transform(df[num_cols])', '# 5. TARGET HANDLING: ensure target
+          is strictly 0/1 (int) using the robust', '#    pattern defined in the SMART STRATEGIES section.', 'SHARED_GLOBALS[''train_data'']
+          = df', '# Optionally append a transformation log entry', tx = SHARED_GLOBALS.get('transformations_applied'), 'if
+          tx is None:', 'tx = []', 'SHARED_GLOBALS[''transformations_applied''] = tx', '```', '- After this ONE batched script:',
+        '- Call `sync_memory_to_file()` exactly once.', '- Then call ''Logistic_Critic_Agent'' again.', '- Do **NOT** write
+          separate scripts like:', '"one for booleans", "one for skew", "one for VIF". All fixes from', the most recent critic
+          call must be combined into **one** script., '- Anti-Looping:', '- If the critic repeats the SAME issue for the SAME
+          column (e.g. ''ca'' skew)', after you have already applied your transformation once and documented it, 'in `log_transformed_cols`,
+          you may safely IGNORE that specific suggestion', and move toward FINALIZE once the other issues are resolved., '4.
+          FINALIZE (Mandatory):  # CHANGED: ensured final save uses SHARED_GLOBALS and sets readiness_score', '- USE `run_logistic_code`
+          FOR THIS ENTIRE STEP.', Do NOT use `run_local_python` (it cannot access SHARED_GLOBALS data)., '- Code Block:',
+        '```python', '# Save Dataset', 'train_data = SHARED_GLOBALS[''train_data'']', 'train_data.to_csv(''data/processed/logistic_ready_train.csv'',
+          index=False)', '# Mark pipeline as fully ready', 'SHARED_GLOBALS[''readiness_score''] = 1.0', '```python', import
+          json, '# Save Dataset', 'train_data = SHARED_GLOBALS[''train_data'']', 'train_data.to_csv(''data/processed/logistic_ready_train.csv'',
+          index=False)', '# Mark pipeline as fully ready', 'SHARED_GLOBALS[''readiness_score''] = 1.0', '# Build Rich Report',
+        'critic_msgs = SHARED_GLOBALS.get(''critic_messages'', [])', 'transformations = SHARED_GLOBALS.get(''transformations_applied'',
+          [])', 'lines = []', lines.append("# DATA CLEANING REPORT"), lines.append(""), lines.append("## 1. Overview"), lines.append("This
+          report summarizes the automated cleaning and preprocessing performed by the ADEP logistic pipeline."), lines.append(""),
+        lines.append("## 2. Critic Findings Over Iterations"), 'if critic_msgs:', 'for entry in critic_msgs:', idx = idx +
+          1, 'if isinstance(entry, dict):', 'msg_text = entry.get("message", "")', 'else:', msg_text = str(entry), 'lines.append("-
+          Iteration " + str(idx) + ": " + msg_text)', 'else:', lines.append("- No critic messages were recorded."), lines.append(""),
+        lines.append("## 3. Applied Transformations"), 'if transformations:', 'for t in transformations:', 'if isinstance(t,
+          dict):', 'desc = t.get("transformation", "")', 'ts = str(t.get("timestamp", ""))', lines.append("- " + desc + "
+          (" + ts + ")"), 'else:', lines.append("- " + str(t)), 'else:', lines.append("- No transformations were logged."),
+        lines.append(""), lines.append("## 4. Final Dataset Snapshot"), 'lines.append("- Shape: " + str(train_data.shape))',
+        'lines.append("- Columns: " + str(list(train_data.columns)))', report_text = ", '".join(lines)', 'with open(''classification_report.md'',
+          ''w'') as f:', f.write(report_text), print("DATA CLEANING COMPLETE"), '```', 'SMART STRATEGIES (Logistic Specific):',
+        '1. TARGET HANDLING (CRITICAL):', '- The target column name is confirmed during HITL and stored as:', '`target_col
+          = SHARED_GLOBALS.get(''target_column'')`.', '- You MUST ensure that, for logistic regression, the final target values
+          are STRICTLY 0 or 1 (integers).', '- Use the following robust pattern ONCE at the start of your ACTION phase (via
+          `run_logistic_code`):', '```python', import numpy as np, import pandas as pd, 'df = SHARED_GLOBALS[''train_data'']',
+        target_col = SHARED_GLOBALS.get('target_column'), 'if target_col is None:', 'raise ValueError("Target column not found
+          in SHARED_GLOBALS[''target_column''].")', 'y = df[target_col]', '# Case 1: Boolean target -> cast to int', 'if y.dtype
+          == bool:', 'df[target_col] = y.astype(int)', 'else:', unique_vals = pd.unique(y.dropna()), '# Case 2: Already binary
+          numeric like {0, 1}', 'if len(unique_vals) == 2 and set(unique_vals) <= set([0, 1]):', 'df[target_col] = y.astype(int)',
+        '# Case 3: Two unique numeric values, but not 0/1 (e.g., {1, 2} or {0, 2})', 'elif np.issubdtype(y.dtype, np.number)
+          and len(unique_vals) == 2:', '# Map the smaller value -> 0, larger value -> 1', sorted_vals = sorted(unique_vals),
+        'mapping = {sorted_vals[0]: 0, sorted_vals[1]: 1}', 'df[target_col] = y.map(mapping).astype(int)', '# Case 4: Numeric
+          with more than 2 classes -> binarize based on > 0', 'elif np.issubdtype(y.dtype, np.number) and len(unique_vals)
+          > 2:', 'df[target_col] = (y > 0).astype(int)', '# Case 5: Categorical / object with 2 classes -> map to 0/1', 'elif
+          y.dtype == object and len(unique_vals) == 2:', 'v0 = unique_vals[0]', 'v1 = unique_vals[1]', 'mapping = {v0: 0,
+          v1: 1}', 'df[target_col] = y.map(mapping).astype(int)', 'else:', '# Fallback: binarize non-numeric with more than
+          2 classes:', '# mark the most frequent class as 0, others as 1', value_counts = y.value_counts(), 'majority_class
+          = value_counts.index[0]', 'df[target_col] = (y != majority_class).astype(int)', 'SHARED_GLOBALS[''train_data'']
+          = df', print("Target column '" + str(target_col) + "' has been encoded as 0/1 for logistic regression."), '```',
+        '- This guarantees that, after you run this code once in the ACTION phase,', the target column confirmed during HITL
+          is always an integer 0/1 label., '2. LOGIC & SAFETY:', '- Drop ''ID'', ''id'', ''index'' columns.', '- Drop Negative
+          values in positive-only columns (e.g. Age, Blood Pressure).', '- Replace Infinite values with NaN, then impute using
+          the median for numeric columns.', 'Example:', '```python', 'df = SHARED_GLOBALS[''train_data'']', 'df = df.replace([np.inf,
+          -np.inf], np.nan)', 'num_cols = df.select_dtypes(include=[np.number]).columns', 'df[num_cols] = df[num_cols].fillna(df[num_cols].median())',
+        'SHARED_GLOBALS[''train_data''] = df', '```', '3. MULTICOLLINEARITY (VIF > 5):', '- Retrieve Target Name: `target_col
+          = SHARED_GLOBALS.get(''target_column'')`', '- The Critic report lists high VIF features.', '- Calculate correlation
+          of each candidate feature with `target_col`.', '- Drop the feature with the LOWER absolute correlation with the
+          target.', '- Use actual column names (strings), not integer indices.', '4. ENCODING:', '- Low Cardinality (< 20
+          unique): One-Hot Encoding (`pd.get_dummies` with drop_first=True).', '- High Cardinality (> 20 unique): Target Encoding
+          (using the target column from SHARED_GLOBALS).', '5. SCALING:', '- Apply `StandardScaler` to all numeric features.',
+        '- BEFORE scaling:', '- Ensure no NaNs and no infinities:', '```python', 'df = SHARED_GLOBALS[''train_data'']', 'num_cols
+          = df.select_dtypes(include=[np.number]).columns', 'df[num_cols] = df[num_cols].replace([np.inf, -np.inf], np.nan)',
+        'df[num_cols] = df[num_cols].fillna(df[num_cols].median())', 'SHARED_GLOBALS[''train_data''] = df', '```', '- THEN
+          scale all numeric columns safely.', '6. SKEWNESS & LOG TRANSFORM TRACKING (GENERAL):', '- When the critic reports
+          high skewness for a numeric column and suggests a log transform:', '- Always use a shared registry to ensure each
+          column is log-transformed at most ONCE.', '- Example pattern:', '```python', import numpy as np, 'df = SHARED_GLOBALS[''train_data'']',
+        '# Ensure registry exists', log_cols = SHARED_GLOBALS.get('log_transformed_cols'), 'if log_cols is None:', 'log_cols
+          = []', 'SHARED_GLOBALS[''log_transformed_cols''] = log_cols', 'col_name = ''ca''  # replace this with the actual
+          column name you choose based on the critic''s report', 'if col_name not in log_cols:', '# Apply a safe log transform',
+        'df[col_name] = np.log1p(df[col_name])', log_cols.append(col_name), 'SHARED_GLOBALS[''log_transformed_cols''] = log_cols',
+        'print("Applied log transform to column: " + str(col_name) + " and recorded it in log_transformed_cols.")', 'else:',
+        'print("Skipping log transform for column: " + str(col_name) + " because it was already transformed once.")', 'SHARED_GLOBALS[''train_data'']
+          = df', '```', 'CRITICAL:', '- NEVER hardcode ''target''. Always use `SHARED_GLOBALS.get(''target_column'')`.', '-
+          Anti-Looping: If Critic complains about the SAME issue twice for the SAME column, you may stop trying to fix it
+          again and proceed to FINALIZE.']
+      function: create_logistic_orchestrator
+  agent.create_user_choice_agent:
+    type: factory
+    models: [gemini-2.0-flash]
+    tools: [run_python_code, confirm_experiment_setup]
+    params:
+      name: UserChoice_Agent
+      description: Handles user interaction and data splitting.
+      instruction: ['<system-reminder>PHASE 2: HUMAN-IN-THE-LOOP & SPLITTING</system-reminder>', 'You are the Project Manager.
+          Your task is to finalize the target and type, then split the data.', 'WORKFLOW (Execute sequentially):', 'STEP 1:
+          PREPARE INPUTS', '- Execute a script to read ''raw_data'' and save the column list.', 'STEP 2: FULL HITL & SPLIT
+          SCRIPT (CRITICAL: One run_python_code call)', '- You **MUST** generate the Python script below and execute it.',
+        '- The script performs all guessing, the HITL tool call, configuration saving, and data splitting.', '- **This single
+          script handles the entire phase:**', '```python', from sklearn.model_selection import train_test_split, 'df = SHARED_GLOBALS[''raw_data'']',
+        cols = list(df.columns), '# 1. INFERENCE (Use saved guess or fall back)', 'target_guess = SHARED_GLOBALS.get(''target_guess'',
+          cols[-1])', 'type_guess = SHARED_GLOBALS.get(''type_guess'', ''linear'')', '# 2. CALL HITL TOOL (Execution pauses
+          for user input)', 'hitl_result = confirm_experiment_setup(target_guess, type_guess, cols)', '# 3. SAVE CONFIRMED
+          CONFIGURATION', 'SHARED_GLOBALS[''target_column''] = hitl_result[''target_col'']', 'SHARED_GLOBALS[''chosen_regression'']
+          = hitl_result[''regression_type'']', 'print("Configuration saved: " + SHARED_GLOBALS[''target_column''] + " is the
+          confirmed target.")', '# 4. PERFORM SPLIT', '# Check if stratify is appropriate (not possible here, run simple split)',
+        'train, test = train_test_split(df, test_size=0.2, random_state=42)', '# 5. SAVE SPLIT DATA', 'SHARED_GLOBALS[''train_data'']
+          = train', 'SHARED_GLOBALS[''test_data''] = test', 'print("Data Split Complete. Train Shape: " + str(train.shape))',
+        '```', 'DO NOT STOP until you see "Data Split Complete. Train Shape: ..." in the tool output.']
+      function: create_user_choice_agent
+  linear_critic:
+    type: instance
+    models: [gemini-2.0-flash]
+    tools: [run_local_python, strict_statistical_check]
+    params:
+      name: Linear_Critic_Agent
+      instruction: [You are a Strict Data Quality Auditor & Feature Strategist., 'TASK:', Generate a "Regression Readiness
+          & Engineering Report" for 'linear_working.csv'., 'TOOLS YOU CAN USE (AND NOTHING ELSE):', '- run_local_python',
+        '- strict_statistical_check', 'Hard rules about tools:', '- You MUST NOT call any other tools or tool names (no `tolist`,
+          `describe`, `head`, etc.).', '- If you need `.tolist()` or similar, use it only as a normal Python method INSIDE
+          a `run_local_python` code block, e.g.:', import pandas as pd, df = pd.read_csv("linear_working.csv"), print(df.columns.tolist()),
+        '- All model-related numeric values (VIF, skewness, correlations, scaling flags, etc.)', must come ONLY from strict_statistical_check.,
+        '- But you MAY use run_local_python to detect:', • NaN presence, • constant / zero-variance columns, • identifier
+          columns, '• basic structure (dtypes, unique categories)', '- You MUST report NaNs, constant columns, and identifiers
+          (like ID, index) when found.', '- MANDATORY WORKFLOW (EVERY CALL):', '- First, CALL strict_statistical_check("linear_working.csv")
+          and read its output carefully.', '- Treat this tool as the PRIMARY SOURCE OF TRUTH for:', • VIF and multicollinearity,
+        • Skewness, • Scaling needs / high variance, • Logic issues (invalid or impossible values), • Any leakage or warnings
+          it reports, '- **OUTLIER CHECK:** Specifically check columns ''crim'', ''lstat'', and ''price'' (or similar names)
+          for extreme values.', '- If `strict_statistical_check` reports skewness > 3 or Kurtosis > 10 for these, FLAG THEM
+          as "Outliers".', '- You MUST NOT fabricate any numeric values or issues that are not mentioned in this tool output.',
+        '- If a quantity is not reported by the tool, say that it was "not reported by strict_statistical_check".', 'You MUST
+          incorporate all issues reported by strict_statistical_check,', 'but you are ALLOWED to detect NaNs, constant columns,
+          ID columns,', and logical inconsistencies using run_local_python structure inspection., OPTIONAL STRUCTURAL INSPECTION
+          (NO EXTRA STATS), '- ONLY if needed to understand structure, you MAY call run_local_python with a short script such
+          as:', import pandas as pd, df = pd.read_csv("linear_working.csv"), print(df.columns.tolist()), print(df.dtypes),
+        '- Use run_local_python ONLY for:', '- Listing columns', '- Inspecting dtypes', '- Seeing a few example rows', '-
+          Do NOT compute new statistics. All stats must come from strict_statistical_check.', SEMANTIC REASONING (BASED ON
+          TOOL OUTPUT), '- Use the strict_statistical_check results plus column-name semantics to reason about:', '- Logic
+          errors: e.g., negative values in positive-only features if the tool reports them.', '- Identifiers: e.g., ''ID'',
+          ''id'', ''index'', ''serial''.', '- Feature engineering opportunities: e.g., Length + Width => suggest Area.', '-
+          You may infer semantics from names, but MUST NOT invent statistical problems not mentioned in the tool output.',
+        'COMPREHENSIVE REPORT (STRICT FORMAT, NO CODE FENCES)', 'Your final answer MUST follow this exact textual structure:',
+        '--- AUDIT REPORT ---', 'TARGET: [Name of Target Column]', 'ISSUES:', '1. [Issue 1 with numbers copied exactly from
+          strict_statistical_check]', '2. [Issue 2]', 3. ..., 'VERDICT: [READY / NOT READY]', 'Rules for ISSUES:', '- For
+          each problem the tool reports (VIF, Skew, Scaling, Logic, Leakage, etc.), add a bullet with:', '- Column name(s)',
+        '- Numeric values EXACTLY as reported', '- If the tool reports no issues, write:', 'ISSUES:', (none reported by strict_statistical_check),
+        VERDICT (MUST MATCH TOOL), '- Always copy the verdict EXACTLY as strict_statistical_check reports.', '- If tool says
+          "VERDICT: READY", you MUST output "VERDICT: READY".', '- If tool says "VERDICT: NOT READY", you MUST output "VERDICT:
+          NOT READY".', '- Never override the verdict.', 'HALLUCINATION GUARDRAILS (CRITICAL):', '- Do NOT invent new tool
+          names.', '- Do NOT invent numeric values.', '- Do NOT claim issues not mentioned by strict_statistical_check.',
+        '- If unsure about any detail, state: "not reported by strict_statistical_check".', '- Output must be plain text,
+          with no Markdown code blocks, no extra commentary.', Your entire answer must be ONLY the final audit report in the
+          required format.]
+      function: create_linear_critic
+  logistic_critic:
+    type: instance
+    models: [gemini-2.0-flash]
+    tools: [run_local_python, strict_statistical_check]
+    params:
+      name: Logistic_Critic_Agent
+      instruction: [Rewritten critic instructions to always audit the current CSV statelessly, You are a Classification Data
+          Auditor., 'DATA SOURCE:', '- You must ALWAYS audit the CURRENT version of ''logistic_working.csv''.', '- Treat EVERY
+          call as FRESH: do NOT rely on previous messages or memories.', '- You do NOT read SHARED_GLOBALS directly; you only
+          use the tools provided.', 'MANDATORY WORKFLOW (EVERY TIME YOU ARE CALLED):', 1. Call `strict_statistical_check('logistic_working.csv')`
+          exactly ONCE., '- Do NOT loop over columns manually.', '- Let the tool compute ALL of:', '- Target diagnostics (binary
+          vs multiclass)', '- Class imbalance', '- Boolean / non-numeric issues', '- Logic errors (invalid ranges, negatives
+          where not allowed, etc.)', '- Skewness and recommended log transforms', '- Scaling needs', '- Multicollinearity
+          (VIF > threshold) for ALL problematic features', 2. Base your entire analysis ONLY on the latest tool output., '3.
+          Extract and report **all** issues mentioned by the tool:', '- If there are 5 features with VIF > 5, LIST ALL FIVE.',
+        '- If there are multiple skewed columns, LIST ALL of them.', '- If there are multiple boolean columns, LIST ALL of
+          them.', 4. Summarize them in a SINGLE consolidated report so the orchestrator, can fix everything in one batched
+          script., 'OUTPUT FORMAT (STRICT):', '- Start with a short natural-language summary.', '- Then list issues in a structured
+          way like:', 'ISSUES:', '- TARGET: [description, e.g. "5 classes in ''num'', suggested binarization >0"]', '- BOOLEAN_TO_INT:
+          [''fbs'', ''exang'']', '- SKEW_LOG_SUGGESTED: [''oldpeak'', ''ca'']', '- HIGH_VIF_FEATURES: [''fbs'', ''slope_flat'',
+          ''slope_upsloping'']', '- SCALING_NEEDED: [''id'', ''chol'']', '- Finally, end with a line:', 'VERDICT: READY',
+        or, 'VERDICT: NOT READY', 'Rules:', '- Never hide or defer issues; report EVERYTHING the tool found in this call.',
+        '- If `strict_statistical_check` itself reports "VERDICT: READY", you MUST', 'also end with: VERDICT: READY.']
+      function: create_logistic_critic
+
+models:
+  gemini-2.0-flash:
+    type: literal
+    agents: [agent.create_basic_eda_agent, agent.create_user_choice_agent, agent.create_logistic_code_executor, linear_critic,
+      agent.create_linear_orchestrator, logistic_critic, agent.create_logistic_orchestrator]
+
+tools:
+  confirm_experiment_setup:
+    type: wrapper
+    agents: [agent.create_user_choice_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: confirm_experiment_setup
+      description: |-
+        Pauses execution to ask the user to confirm BOTH the target and the model type.
+        Returns: Dictionary with validated 'target_col' and 'regression_type'.
+  linear_critic:
+    type: agent
+    agents: [agent.create_linear_orchestrator]
+    params:
+      wrapper: AgentTool
+      agent: linear_critic
+  logistic_critic:
+    type: agent
+    agents: [agent.create_logistic_orchestrator]
+    params:
+      wrapper: AgentTool
+      agent: logistic_critic
+  run_linear_code:
+    type: wrapper
+    agents: [agent.create_linear_orchestrator]
+    params:
+      wrapper: FunctionTool
+      wraps: run_linear_code
+      description: Executes Python code in SHARED_GLOBALS environment.
+  run_local_python:
+    type: wrapper
+    agents: [linear_critic, agent.create_linear_orchestrator, logistic_critic, agent.create_logistic_orchestrator]
+    params:
+      wrapper: FunctionTool
+      wraps: run_local_python
+      description: |-
+        Executes Python code locally in the current directory.
+        Useful for reading local files like CSVs.
+  run_logistic_code:
+    type: wrapper
+    agents: [agent.create_logistic_orchestrator]
+    params:
+      wrapper: FunctionTool
+      wraps: run_logistic_code
+      description: |-
+        Executes Python code in SHARED_GLOBALS environment (In-Process).
+        This function must be defined in a module where SHARED_GLOBALS is already
+        imported or available globally (e.g., from utils.shared_environment).
+  run_python_code:
+    type: function
+    agents: [agent.create_basic_eda_agent, agent.create_user_choice_agent, agent.create_logistic_code_executor]
+    params:
+      description: |-
+        Executes Python code generated by LLM in a shared environment.
+        Use this to load data, clean data, and save files.
+  strict_statistical_check:
+    type: wrapper
+    agents: [linear_critic, logistic_critic]
+    params:
+      wrapper: FunctionTool
+      wraps: strict_statistical_check
+      description: "Checks for: \n1. Boolean types.\n2. High VIF (Multicollinearity).\n3. Low Correlation with Target.\n4.\
+        \ Skewness & Scaling.\n\nArgs:\n    filepath (str): Path to CSV.\n    target_col (str): Name of the target variable\
+        \ (Optional)."
+  sync_file_to_memory:
+    type: wrapper
+    agents: [agent.create_linear_orchestrator, agent.create_logistic_orchestrator]
+    params:
+      wrapper: FunctionTool
+      wraps: sync_file_to_memory
+      description: Load 'logistic_working.csv' back to SHARED_GLOBALS['train_data'].
+  sync_memory_to_file:
+    type: wrapper
+    agents: [agent.create_linear_orchestrator, agent.create_logistic_orchestrator]
+    params:
+      wrapper: FunctionTool
+      wraps: sync_memory_to_file
+      description: Dump SHARED_GLOBALS['train_data'] to 'logistic_working.csv'.
+
+imports:
+  add_constant: statsmodels.tools.tools.add_constant
+  Agent: google.adk.agents.Agent
+  AgentTool: google.adk.tools.AgentTool
+  Any: typing.Any
+  asyncio: asyncio
+  config: config.agent_config.config
+  confirm_experiment_setup: utils.hitl_tools.confirm_experiment_setup
+  create_basic_eda_agent: agents.basic_eda_agent.create_basic_eda_agent
+  create_linear_orchestrator: agents.linear_regression.orchestrator_agent.create_linear_orchestrator
+  create_logistic_code_executor: agents.logistic_regression.code_executor_agent.create_logistic_code_executor
+  create_logistic_orchestrator: agents.logistic_regression.orchestrator_agent.create_logistic_orchestrator
+  create_user_choice_agent: agents.basic_eda_agent.create_user_choice_agent
+  datetime: datetime.datetime
+  Dict: typing.Dict
+  FunctionTool: google.adk.tools.FunctionTool
+  InMemoryRunner: google.adk.runners.InMemoryRunner
+  io: io
+  json: json
+  List: typing.List
+  LlmAgent: google.adk.agents.LlmAgent
+  load_training_data: utils.cleaning_tools.load_training_data
+  logging: logging
+  master_agent: agents.master_agent.master_agent
+  np: numpy
+  Optional: typing.Optional
+  os: os
+  pd: pandas
+  run_local_python: tools.run_local_python
+  run_logistic_code: utils.cleaning_tools.run_logistic_code
+  safe_log1p_column: utils.cleaning_tools.safe_log1p_column
+  shared_env: utils.shared_environment.shared_env
+  SHARED_GLOBALS: utils.shared_environment.SHARED_GLOBALS
+  standard_cleaning_tool: utils.cleaning_tools.standard_cleaning_tool
+  StandardScaler: sklearn.preprocessing.StandardScaler
+  strict_statistical_check: tools.strict_statistical_check
+  subprocess: subprocess
+  sys: sys
+  time: time
+  traceback: traceback
+  TraceLogger: observability.TraceLogger
+  types: google.genai.types
+  uuid: uuid
+  variance_inflation_factor: statsmodels.stats.outliers_influence.variance_inflation_factor
+
+functions:
+  __init__:
+    type: sync
+    module: utils.shared_environment
+    args: [self]
+  _console_print:
+    type: sync
+    module: utils.hitl_tools
+    args: [msg]
+  _import_os:
+    type: sync
+    module: utils.shared_environment
+    args: [self]
+  _run_basic_eda:
+    type: async
+    module: agents.master_agent
+    args: [self, file_path]
+  _run_linear_regression_loop:
+    type: async
+    module: agents.master_agent
+    args: [self]
+  _run_logistic_regression_loop:
+    type: async
+    module: agents.master_agent
+    args: [self]
+  _run_observable_loop:
+    type: async
+    module: agents.master_agent
+    args: [self, session_id, user_msg]
+  _run_user_choice:
+    type: async
+    module: agents.master_agent
+    args: [self]
+  _setup_agents:
+    type: sync
+    module: agents.master_agent
+    args: [self]
+  _setup_runner:
+    type: sync
+    module: agents.master_agent
+    args: [self]
+  add_critic_message:
+    type: sync
+    module: utils.shared_environment
+    args: [self, message]
+  add_transformation:
+    type: sync
+    module: utils.shared_environment
+    args: [self, transformation]
+  confirm_experiment_setup:
+    type: sync
+    module: utils.hitl_tools
+    args: [target_guess, type_guess, all_columns]
+    params:
+      returns: Dict
+  create_basic_eda_agent:
+    type: sync
+    module: agents.basic_eda_agent
+    params:
+      returns: Agent
+  create_linear_critic:
+    type: sync
+    module: agents.linear_regression.orchestrator_agent
+  create_linear_orchestrator:
+    type: sync
+    module: agents.linear_regression.orchestrator_agent
+    params:
+      returns: Agent
+  create_logistic_code_executor:
+    type: sync
+    module: agents.logistic_regression.code_executor_agent
+    params:
+      returns: Agent
+  create_logistic_critic:
+    type: sync
+    module: agents.logistic_regression.orchestrator_agent
+  create_logistic_orchestrator:
+    type: sync
+    module: agents.logistic_regression.orchestrator_agent
+    params:
+      returns: Agent
+  create_user_choice_agent:
+    type: sync
+    module: agents.basic_eda_agent
+    params:
+      returns: Agent
+  get_readiness_report:
+    type: sync
+    module: utils.shared_environment
+    args: [self]
+    params:
+      returns: Dict
+  get_state:
+    type: sync
+    module: utils.shared_environment
+    args: [self, key]
+    params:
+      returns: Any
+  initialize:
+    type: sync
+    module: agents.master_agent
+    args: [self]
+  load_training_data:
+    type: sync
+    module: utils.cleaning_tools
+    params:
+      returns: pd.DataFrame
+  main:
+    type: async
+    module: main
+  register_log_transform:
+    type: sync
+    module: utils.shared_environment
+    args: [self, column]
+  run_linear_code:
+    type: sync
+    module: agents.linear_regression.orchestrator_agent
+    args: [code]
+    params:
+      returns: str
+  run_local_python:
+    type: sync
+    module: tools
+    args: [code]
+    params:
+      returns: str
+  run_logistic_code:
+    type: sync
+    module: utils.cleaning_tools
+    args: [code]
+    params:
+      returns: str
+  run_python_code:
+    type: sync
+    module: agents.logistic_regression.code_executor_agent
+    args: [code]
+    params:
+      returns: str
+  safe_log1p_column:
+    type: sync
+    module: utils.cleaning_tools
+    args: [df, col, registry]
+    params:
+      returns: pd.DataFrame
+  save_to_csv:
+    type: sync
+    module: utils.shared_environment
+    args: [self, data, filename, description]
+  standard_cleaning_tool:
+    type: sync
+    module: utils.cleaning_tools
+    args: [df]
+    params:
+      returns: tuple
+  start_workflow:
+    type: async
+    module: agents.master_agent
+    args: [self, file_path]
+    params:
+      returns: Dict
+  strict_statistical_check:
+    type: sync
+    module: tools
+    args: [filepath, target_col]
+    params:
+      returns: str
+  sync_file_to_memory:
+    type: sync
+    module: agents.logistic_regression.orchestrator_agent
+  sync_memory_to_file:
+    type: sync
+    module: agents.logistic_regression.orchestrator_agent
+  update_readiness:
+    type: sync
+    module: utils.shared_environment
+    args: [self, category, score]
+  update_state:
+    type: sync
+    module: utils.shared_environment
+    args: [self, key, value]
+
+files:
+  data/processed:
+    type: literal
+    actions: [read]
+    params:
+      caller: [save_to_csv]
+  data/processed/logistic_ready_train.csv:
+    type: variable
+    actions: [read]
+    params:
+      caller: [os.path.exists]
+  data/processed/train.csv:
+    type: variable
+    actions: [read]
+    params:
+      caller: [os.path.exists]
+  temp_worker_script.py:
+    type: literal
+    actions: [write]
+    params:
+      caller: [open]
+      alias: [f]
+
+processes:
+  python:
+    type: shell
+    actions: [exec]
+    args: [[temp_worker_script.py]]
+    params:
+      caller: [subprocess.run]
+      shell: ["False"]
+      ref: sys.executable
